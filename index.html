@@ -319,12 +319,11 @@
 <script>
 "use strict";
 /* ============================================================================
-   NEON FIST — TURBO EDITION (release v2)
+   NEON FIST — TURBO EDITION (release v3)
    Fixes in this build:
-     · Foot orientation on right-side fighter (removed double-mirror in drawFoot)
-     · Jump-over now works: push-apart gated on both fighters being grounded
-     · Jump velocities raised so airborne fighter clears standing hurtbox
-     · Air control speed raised so a full jump arc can cross the push distance
+     · Air attacks now register damage — resolveMelee() runs whenever the
+       round is active, independent of whether both fighters are grounded.
+       Push-apart stays gated on both grounded so jump-over still works.
    ========================================================================== */
 
 const CFG = {
@@ -429,12 +428,6 @@ const KEY_DOWN = ['ArrowDown','KeyS'];
 const KEY_CONFIRM = ['Enter','Space','KeyJ'];
 const SEL_P1_OK = ['KeyJ','Space','Enter'];
 
-/* ----------------------------------------------------------------------------
-   CHARACTERS
-   Jump velocities tuned so that max jump height exceeds the 162px standing
-   hurtbox, allowing a clean cross-over jump. Volt and Venom jump higher;
-   Blaze jumps lower but still clears.
-   -------------------------------------------------------------------------- */
 const CHARS = [
   {
     id:'blaze', name:'BLAZE', title:'THE INFERNO',
@@ -957,12 +950,6 @@ class Fighter {
     }
   }
   handleControl(input,opp){
-    /* ----------------------------------------------------------------------
-       AIRBORNE CONTROL
-       Air control speed is 3.0 px/frame, giving ~125 px of horizontal travel
-       over a full jump arc — comfortably more than the 62 px push distance,
-       so a committed jump can fully cross over the opponent.
-       ---------------------------------------------------------------------- */
     if(!this.onGround){
       const dir = (input.right?1:0) - (input.left?1:0);
       this.x += dir * 3.0;
@@ -2327,6 +2314,11 @@ class Game {
     drawHead(ctx, [0, 0], def, {lean:0, headX:0, headY:0}, 1);
     ctx.restore();
   }
+  /* ----------------------------------------------------------------------
+     FIGHT UPDATE — collision resolution runs every active frame.
+     Only the push-apart constraint is gated on both fighters being grounded,
+     which preserves the jump-over capability without disabling air attacks.
+     ---------------------------------------------------------------------- */
   updateFight(){
     if(this.hitStop>0){
       this.hitStop--;
@@ -2350,22 +2342,20 @@ class Game {
     this.p1.update(i1, this.p2, this);
     this.p2.update(i2, this.p1, this);
 
-    /* ----------------------------------------------------------------------
-       PUSH APART — only when BOTH fighters are grounded.
-       This is what allows a jump-over: as soon as one leaves the ground,
-       the horizontal separation constraint is lifted, so the airborne
-       fighter can pass through and land on the other side.
-       ---------------------------------------------------------------------- */
-    if(!lockAll && this.p1.onGround && this.p2.onGround){
-      const dx = this.p2.x - this.p1.x;
-      const adx = Math.abs(dx);
-      if(adx < CFG.PUSH_DIST){
-        const push = (CFG.PUSH_DIST - adx)*0.5*(dx>=0?1:-1);
-        this.p1.x -= push;
-        this.p2.x += push;
-        this.p1.x = clamp(this.p1.x, CFG.STAGE_LEFT, CFG.STAGE_RIGHT);
-        this.p2.x = clamp(this.p2.x, CFG.STAGE_LEFT, CFG.STAGE_RIGHT);
+    if(!lockAll){
+      // Horizontal separation constraint — only when both are grounded.
+      if(this.p1.onGround && this.p2.onGround){
+        const dx = this.p2.x - this.p1.x;
+        const adx = Math.abs(dx);
+        if(adx < CFG.PUSH_DIST){
+          const push = (CFG.PUSH_DIST - adx)*0.5*(dx>=0?1:-1);
+          this.p1.x -= push;
+          this.p2.x += push;
+          this.p1.x = clamp(this.p1.x, CFG.STAGE_LEFT, CFG.STAGE_RIGHT);
+          this.p2.x = clamp(this.p2.x, CFG.STAGE_LEFT, CFG.STAGE_RIGHT);
+        }
       }
+      // Melee hit detection ALWAYS runs during active play — air attacks included.
       this.resolveMelee();
     }
 
@@ -2462,12 +2452,6 @@ class Game {
     }
     for(const p of this.projectiles) p.draw(ctx);
 
-    /* ----------------------------------------------------------------------
-       FIGHTER DRAW ORDER
-       When one fighter is airborne over the other, draw the airborne fighter
-       FIRST so the grounded fighter appears in front — this reads as the
-       jumper passing "over" rather than "through" the opponent.
-       ---------------------------------------------------------------------- */
     if(this.p1 && this.p2){
       const p1Air = !this.p1.onGround;
       const p2Air = !this.p2.onGround;
@@ -2947,12 +2931,6 @@ function computePose(f){
   }
 }
 
-/* ----------------------------------------------------------------------------
-   FIGHTER BODY RENDER
-   The fighter's outer context applies ctx.scale(f.facing, 1), so all child
-   drawings are automatically mirrored for the left/right facing. Any nested
-   flip would cancel it out — drawFoot no longer applies one.
-   -------------------------------------------------------------------------- */
 function drawFighterBody(ctx, f, p){
   const col = f.def.colors;
   const o = col.outline;
@@ -3115,12 +3093,6 @@ function drawFist(ctx,pos,r,color,outline){
   ctx.fillStyle = color;
   ctx.beginPath(); ctx.arc(pos[0],pos[1],r,0,Math.PI*2); ctx.fill();
 }
-/* ----------------------------------------------------------------------------
-   drawFoot — deliberately does NOT apply any internal mirror. The caller
-   (drawFighterBody) already runs inside a context mirrored by f.facing, so
-   adding another scale here would cancel it out and reverse the ankle on
-   the right-hand fighter.
-   -------------------------------------------------------------------------- */
 function drawFoot(ctx,pos,color,outline){
   ctx.save();
   ctx.translate(pos[0],pos[1]);
