@@ -319,16 +319,12 @@
 <script>
 "use strict";
 /* ============================================================================
-   NEON FIST — TURBO EDITION (release)
-   Comprehensive bug fixes and polish:
-     · Difficulty screen skipped in 2P mode
-     · Simultaneous strikes now trade properly
-     · Winner's victory pose can no longer be interrupted by leftover attacks
-     · Push-apart disabled during KO / timeout / match-over
-     · Removed dead code (unused arrays, unused locals)
-     · Roster thumbnails only redrawn when selection changes
-     · Frozen Peak / Volcano Core arenas + Frost / Venom characters
-     · Backward walk cycle now correct (planted foot slides forward)
+   NEON FIST — TURBO EDITION (release v2)
+   Fixes in this build:
+     · Foot orientation on right-side fighter (removed double-mirror in drawFoot)
+     · Jump-over now works: push-apart gated on both fighters being grounded
+     · Jump velocities raised so airborne fighter clears standing hurtbox
+     · Air control speed raised so a full jump arc can cross the push distance
    ========================================================================== */
 
 const CFG = {
@@ -373,9 +369,6 @@ function mulberry32(a){
   };
 }
 
-/* ----------------------------------------------------------------------------
-   INPUT
-   -------------------------------------------------------------------------- */
 const CAPTURED = new Set([
   'ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','Tab','Enter','Backspace',
   'KeyW','KeyA','KeyS','KeyD','KeyJ','KeyK','KeyL','KeyE','KeyP',
@@ -419,9 +412,6 @@ class InputManager {
   }
 }
 
-/* ----------------------------------------------------------------------------
-   BINDINGS
-   -------------------------------------------------------------------------- */
 const P1_KEYS = {
   left:['KeyA'], right:['KeyD'], up:['KeyW'], down:['KeyS'],
   light:['KeyJ'], medium:['KeyK'], heavy:['KeyL'],
@@ -441,11 +431,14 @@ const SEL_P1_OK = ['KeyJ','Space','Enter'];
 
 /* ----------------------------------------------------------------------------
    CHARACTERS
+   Jump velocities tuned so that max jump height exceeds the 162px standing
+   hurtbox, allowing a clean cross-over jump. Volt and Venom jump higher;
+   Blaze jumps lower but still clears.
    -------------------------------------------------------------------------- */
 const CHARS = [
   {
     id:'blaze', name:'BLAZE', title:'THE INFERNO',
-    hp:106, walkF:2.85, walkB:2.30, jumpV:-15.0,
+    hp:106, walkF:2.85, walkB:2.30, jumpV:-18.5,
     power:1.14, weight:1.15,
     torsoW:40, shoulderW:46, headR:15.5, hipW:13,
     desc:'Heavy hitter · Slow but devastating · High vitality',
@@ -461,7 +454,7 @@ const CHARS = [
   },
   {
     id:'volt', name:'VOLT', title:'THE STORM',
-    hp:96, walkF:3.70, walkB:3.05, jumpV:-16.0,
+    hp:96, walkF:3.70, walkB:3.05, jumpV:-19.5,
     power:0.93, weight:0.92,
     torsoW:32, shoulderW:39, headR:14.5, hipW:11,
     desc:'Fast striker · Superior mobility · Quick projectiles',
@@ -476,7 +469,7 @@ const CHARS = [
   },
   {
     id:'frost', name:'FROST', title:'THE GLACIER',
-    hp:100, walkF:3.20, walkB:2.70, jumpV:-15.5,
+    hp:100, walkF:3.20, walkB:2.70, jumpV:-19.0,
     power:1.00, weight:1.00,
     torsoW:36, shoulderW:42, headR:15.0, hipW:12,
     desc:'Balanced fighter · Ice shard fireball · Erupting ultimate',
@@ -492,7 +485,7 @@ const CHARS = [
   },
   {
     id:'venom', name:'VENOM', title:'THE PLAGUE',
-    hp:92, walkF:3.90, walkB:3.30, jumpV:-16.5,
+    hp:92, walkF:3.90, walkB:3.30, jumpV:-20.0,
     power:0.88, weight:0.85,
     torsoW:30, shoulderW:36, headR:14.0, hipW:10,
     desc:'Fast & fragile · Toxic cloud ultimate · Multi-hit damage',
@@ -508,9 +501,6 @@ const CHARS = [
   }
 ];
 
-/* ----------------------------------------------------------------------------
-   MAPS
-   -------------------------------------------------------------------------- */
 const MAPS = [
   {
     id:'neon_city', name:'NEON CITY', subtitle:'ROOFTOP SUNSET',
@@ -562,9 +552,6 @@ const MAPS = [
   }
 ];
 
-/* ----------------------------------------------------------------------------
-   MOVES
-   -------------------------------------------------------------------------- */
 const MOVES = {
   light:  {label:'JAB', startup:4, active:3, recovery:8, dmg:6, hitstun:15, blockstun:9, kb:2.4, kbUp:0, box:[28,-116,68,28], meter:5},
   medium: {label:'STRAIGHT', startup:7, active:4, recovery:12, dmg:9, hitstun:19, blockstun:11, kb:3.6, kbUp:0, box:[30,-112,86,32], meter:7},
@@ -575,9 +562,6 @@ const MOVES = {
   air:    {label:'DIVE KICK', startup:5, active:10, recovery:8, dmg:9, hitstun:19, blockstun:11, kb:3.4, kbUp:0, box:[24,-98,78,62], meter:7, air:true}
 };
 
-/* ----------------------------------------------------------------------------
-   POSE SYSTEM
-   -------------------------------------------------------------------------- */
 function mkPose(o){
   return Object.assign({
     hipX:0, hipY:-76, lean:0.08, headX:0, headY:0,
@@ -610,7 +594,6 @@ function poseAt(track, frame){
   return last.p;
 }
 
-/* Attack poses */
 const POSE_WIND_L = mkPose({handF:[14,-124], handB:[4,-108], lean:0.02});
 const POSE_JAB = mkPose({hipX:3, lean:0.17, handF:[72,-118], handB:[6,-108], footF:[26,-2], footB:[-19,-2]});
 const POSE_WIND_M = mkPose({hipX:-3, lean:0.03, handF:[18,-122], handB:[-8,-114]});
@@ -664,9 +647,6 @@ const POSE_KO_LANDED = mkPose({
 
 const POSE_WIN = mkPose({hipY:-78, lean:-0.04, handF:[24,-168], handB:[-16,-152], footF:[22,-2], footB:[-24,-2]});
 
-/* ----------------------------------------------------------------------------
-   PARTICLES
-   -------------------------------------------------------------------------- */
 const MAX_PARTICLES = 520;
 const particles = [];
 for(let i=0;i<MAX_PARTICLES;i++){
@@ -811,9 +791,6 @@ function emitFloatText(x,y,text,color){
   spawnParticle({x,y,vx:rand(-0.4,0.4),vy:-2.1,life:46,size:26,color,type:'text',drag:0.96,additive:false});
 }
 
-/* ----------------------------------------------------------------------------
-   IK
-   -------------------------------------------------------------------------- */
 function ik(root,target,l1,l2,bend){
   let dx=target[0]-root[0];
   let dy=target[1]-root[1];
@@ -837,9 +814,6 @@ function bone(ctx,a,b,w,color,outline){
   ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke();
 }
 
-/* ----------------------------------------------------------------------------
-   FIGHTER
-   -------------------------------------------------------------------------- */
 class Fighter {
   constructor(def,index){
     this.def = def;
@@ -983,9 +957,15 @@ class Fighter {
     }
   }
   handleControl(input,opp){
+    /* ----------------------------------------------------------------------
+       AIRBORNE CONTROL
+       Air control speed is 3.0 px/frame, giving ~125 px of horizontal travel
+       over a full jump arc — comfortably more than the 62 px push distance,
+       so a committed jump can fully cross over the opponent.
+       ---------------------------------------------------------------------- */
     if(!this.onGround){
       const dir = (input.right?1:0) - (input.left?1:0);
-      this.x += dir*1.55;
+      this.x += dir * 3.0;
       this.setState('air');
       if(input.light||input.medium||input.heavy) this.startAttack('air');
       return;
@@ -1071,9 +1051,6 @@ class Fighter {
   }
 }
 
-/* ----------------------------------------------------------------------------
-   PROJECTILE
-   -------------------------------------------------------------------------- */
 class Projectile {
   constructor(){ this.alive=false; }
   spawn(owner,x,y,vx,cfg){
@@ -1163,9 +1140,6 @@ class Projectile {
   }
 }
 
-/* ----------------------------------------------------------------------------
-   ULTIMATE EFFECTS
-   -------------------------------------------------------------------------- */
 class LightningStorm {
   constructor(owner,opp){
     this.owner=owner;
@@ -1478,9 +1452,6 @@ class ToxicCloud {
   }
 }
 
-/* ----------------------------------------------------------------------------
-   AI
-   -------------------------------------------------------------------------- */
 class AIController {
   constructor(fighter, difficulty, game){
     this.f = fighter;
@@ -1583,9 +1554,6 @@ class AIController {
   }
 }
 
-/* ----------------------------------------------------------------------------
-   MENU
-   -------------------------------------------------------------------------- */
 class Menu {
   constructor(el, onSelect){
     this.el = el;
@@ -1612,9 +1580,6 @@ class Menu {
   }
 }
 
-/* ----------------------------------------------------------------------------
-   GAME
-   -------------------------------------------------------------------------- */
 class Game {
   constructor(canvas){
     this.canvas = canvas;
@@ -2019,7 +1984,6 @@ class Game {
       if(this.phaseTimer===70){
         const w = this.roundWinner===0 ? this.p1 : this.p2;
         if(w && !w.ko){
-          // Force victory pose and guarantee no leftover attack overrides it
           w.winPose = true;
           w.attack = null;
           w.hitstun = 0;
@@ -2080,7 +2044,6 @@ class Game {
   update(){
     this.globalTime++;
 
-    /* --- Global hotkeys (screen transitions) --- */
     if(this.screen==='fight' && this.input.consumePressed(KEY_PAUSE)){
       this.setScreen('pause');
     } else if(this.screen==='pause' && this.input.consumePressed(KEY_PAUSE)){
@@ -2152,7 +2115,6 @@ class Game {
     else this.setScreen('title');
   }
 
-  /* -------- CHARACTER SELECT -------- */
   enterSelect(){
     this.selIndex = [0,1];
     this.selLocked = [false,false];
@@ -2214,7 +2176,6 @@ class Game {
     d.p2Side.classList.toggle('active', !this.selLocked[1] && p2CanAct);
     d.p2Side.classList.toggle('locked', this.selLocked[1]);
 
-    // Roster highlight
     for(let i=0;i<this.roster1.length;i++){
       this.roster1[i].el.classList.toggle('sel', i===this.selIndex[0]);
     }
@@ -2389,8 +2350,13 @@ class Game {
     this.p1.update(i1, this.p2, this);
     this.p2.update(i2, this.p1, this);
 
-    // Push apart only during active play — not during KO / match over
-    if(!lockAll){
+    /* ----------------------------------------------------------------------
+       PUSH APART — only when BOTH fighters are grounded.
+       This is what allows a jump-over: as soon as one leaves the ground,
+       the horizontal separation constraint is lifted, so the airborne
+       fighter can pass through and land on the other side.
+       ---------------------------------------------------------------------- */
+    if(!lockAll && this.p1.onGround && this.p2.onGround){
       const dx = this.p2.x - this.p1.x;
       const adx = Math.abs(dx);
       if(adx < CFG.PUSH_DIST){
@@ -2454,13 +2420,6 @@ class Game {
       ult: inp.isPressed(keys.ult)
     };
   }
-  /* ----------------------------------------------------------------------
-     MELEE RESOLUTION
-     Snapshot all potential hits BEFORE applying damage, so simultaneous
-     strikes on active frames trade properly. A hit that lands during the
-     opponent's startup still cancels their attack, because their attack
-     reference becomes null before the second snapshot is applied.
-     ---------------------------------------------------------------------- */
   resolveMelee(){
     const pairs = [[this.p1, this.p2], [this.p2, this.p1]];
     const hits = [];
@@ -2502,8 +2461,31 @@ class Game {
       e.draw(ctx);
     }
     for(const p of this.projectiles) p.draw(ctx);
-    if(this.p1) drawFighterBody(ctx, this.p1, computePose(this.p1));
-    if(this.p2) drawFighterBody(ctx, this.p2, computePose(this.p2));
+
+    /* ----------------------------------------------------------------------
+       FIGHTER DRAW ORDER
+       When one fighter is airborne over the other, draw the airborne fighter
+       FIRST so the grounded fighter appears in front — this reads as the
+       jumper passing "over" rather than "through" the opponent.
+       ---------------------------------------------------------------------- */
+    if(this.p1 && this.p2){
+      const p1Air = !this.p1.onGround;
+      const p2Air = !this.p2.onGround;
+      if(p1Air && !p2Air){
+        drawFighterBody(ctx, this.p1, computePose(this.p1));
+        drawFighterBody(ctx, this.p2, computePose(this.p2));
+      } else if(p2Air && !p1Air){
+        drawFighterBody(ctx, this.p2, computePose(this.p2));
+        drawFighterBody(ctx, this.p1, computePose(this.p1));
+      } else {
+        drawFighterBody(ctx, this.p1, computePose(this.p1));
+        drawFighterBody(ctx, this.p2, computePose(this.p2));
+      }
+    } else {
+      if(this.p1) drawFighterBody(ctx, this.p1, computePose(this.p1));
+      if(this.p2) drawFighterBody(ctx, this.p2, computePose(this.p2));
+    }
+
     drawParticles(ctx);
     ctx.restore();
     if(this.screen==='fight' || this.screen==='pause') this.drawHUD(ctx);
@@ -2682,7 +2664,6 @@ class Game {
     this.drawEnergyBar(ctx, CFG.W-60-380, CFG.H-54, 380, 18, p2, true);
     this.drawCombo(ctx, p1, 120, 210, 'left');
     this.drawCombo(ctx, p2, CFG.W-120, 210, 'right');
-    // Map name under timer
     ctx.save();
     ctx.font = '700 12px "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
@@ -2861,12 +2842,8 @@ class Game {
   }
 }
 
-/* ----------------------------------------------------------------------------
-   POSE COMPUTATION
-   -------------------------------------------------------------------------- */
 function computePose(f){
   const t = f.stateTime;
-
   switch(f.state){
     case 'idle': {
       const s = Math.sin(t*0.068);
@@ -2879,7 +2856,6 @@ function computePose(f){
         footB: [-22, -2]
       });
     }
-    /* FORWARD WALK — foot planted during φ∈(0,π), lifted during φ∈(π,2π) */
     case 'walkF': {
       const ph = t * 0.20;
       const c = Math.cos(ph);
@@ -2896,7 +2872,6 @@ function computePose(f){
         footB: [-2 - c*26, -2 - liftB]
       });
     }
-    /* BACKWARD WALK — planted foot slides forward relative to body */
     case 'walkB': {
       const ph = t * 0.17;
       const c = Math.cos(ph);
@@ -2973,7 +2948,10 @@ function computePose(f){
 }
 
 /* ----------------------------------------------------------------------------
-   FIGHTER RENDER
+   FIGHTER BODY RENDER
+   The fighter's outer context applies ctx.scale(f.facing, 1), so all child
+   drawings are automatically mirrored for the left/right facing. Any nested
+   flip would cancel it out — drawFoot no longer applies one.
    -------------------------------------------------------------------------- */
 function drawFighterBody(ctx, f, p){
   const col = f.def.colors;
@@ -3023,7 +3001,7 @@ function drawFighterBody(ctx, f, p){
   drawFist(ctx, armB.end, 8, col.skinDark, o);
   bone(ctx, hipB, legB.joint, 16, darken(col.mainDark), o);
   bone(ctx, legB.joint, legB.end, 13, darken(col.mainDark), o);
-  drawFoot(ctx, legB.end, col.mainDark, o, f.facing);
+  drawFoot(ctx, legB.end, col.mainDark, o);
 
   const tw = f.def.torsoW;
   const sw = f.def.shoulderW;
@@ -3053,7 +3031,6 @@ function drawFighterBody(ctx, f, p){
   rr(ctx, -tw/2, -5, tw, 11, 3); ctx.fill();
   ctx.restore();
 
-  // Chest emblem
   ctx.save();
   ctx.translate(chest[0] + Math.sin(p.lean)*12, chest[1] - Math.cos(p.lean)*12);
   ctx.rotate(p.lean);
@@ -3088,7 +3065,7 @@ function drawFighterBody(ctx, f, p){
 
   bone(ctx, hipF, legF.joint, 16, col.main, o);
   bone(ctx, legF.joint, legF.end, 13, col.main, o);
-  drawFoot(ctx, legF.end, col.main, o, f.facing);
+  drawFoot(ctx, legF.end, col.main, o);
 
   bone(ctx, shoulderF, armF.joint, 13, col.main, o);
   bone(ctx, armF.joint, armF.end, 11, col.skin, o);
@@ -3138,10 +3115,15 @@ function drawFist(ctx,pos,r,color,outline){
   ctx.fillStyle = color;
   ctx.beginPath(); ctx.arc(pos[0],pos[1],r,0,Math.PI*2); ctx.fill();
 }
-function drawFoot(ctx,pos,color,outline,facing){
+/* ----------------------------------------------------------------------------
+   drawFoot — deliberately does NOT apply any internal mirror. The caller
+   (drawFighterBody) already runs inside a context mirrored by f.facing, so
+   adding another scale here would cancel it out and reverse the ankle on
+   the right-hand fighter.
+   -------------------------------------------------------------------------- */
+function drawFoot(ctx,pos,color,outline){
   ctx.save();
   ctx.translate(pos[0],pos[1]);
-  ctx.scale(facing,1);
   ctx.fillStyle = outline;
   rr(ctx,-9,-8,26,16,6); ctx.fill();
   ctx.fillStyle = color;
@@ -3310,9 +3292,6 @@ function drawHead(ctx,c,def,p,facing){
   }
 }
 
-/* ----------------------------------------------------------------------------
-   BOOTSTRAP
-   -------------------------------------------------------------------------- */
 const canvas = document.getElementById('cv');
 const game = new Game(canvas);
 window.game = game;
